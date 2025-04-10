@@ -5,23 +5,22 @@ import {
 	Plugin,
 	PluginSettingTab,
 	Setting,
+	Notice,
 } from "obsidian";
-import { TranscriptView, TRANSCRIPT_TYPE_VIEW } from "src/transcript-view";
 import { PromptModal } from "src/prompt-modal";
 import { EditorExtensions } from "../editor-extensions";
+import { YoutubeTranscript, TranscriptConfig, TranscriptResponse, YoutubeTranscriptError } from "src/fetch-transcript";
 
 interface YTranscriptSettings {
 	timestampMod: number;
 	lang: string;
 	country: string;
-	leafUrls: string[];
 }
 
 const DEFAULT_SETTINGS: YTranscriptSettings = {
 	timestampMod: 5,
 	lang: "en",
 	country: "EN",
-	leafUrls: [],
 };
 
 export default class YTranscriptPlugin extends Plugin {
@@ -30,57 +29,113 @@ export default class YTranscriptPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.registerView(
-			TRANSCRIPT_TYPE_VIEW,
-			(leaf) => new TranscriptView(leaf, this),
-		);
-
 		this.addCommand({
 			id: "transcript-from-text",
-			name: "Get YouTube transcript from selected url",
-			editorCallback: (editor: Editor, _: MarkdownView) => {
+			name: "Insert YouTube transcript from selected URL",
+			editorCallback: (editor: Editor, view: MarkdownView) => {
 				const url = EditorExtensions.getSelectedText(editor).trim();
-				this.openView(url);
+				if (url) {
+					this.insertTranscript(url, editor, view);
+				} else {
+					new Notice("No URL selected");
+				}
 			},
 		});
 
 		this.addCommand({
 			id: "transcript-from-prompt",
-			name: "Get YouTube transcript from url prompt",
-			callback: async () => {
+			name: "Insert YouTube transcript from URL prompt",
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
 				const prompt = new PromptModal();
 				const url: string = await new Promise((resolve) =>
-					prompt.openAndGetValue(resolve, () => {}),
+					prompt.openAndGetValue(resolve, () => {})
 				);
 				if (url) {
-					this.openView(url);
+					this.insertTranscript(url, editor, view);
 				}
 			},
 		});
 
-		this.addSettingTab(new YTranslateSettingTab(this.app, this));
+		this.addSettingTab(new YTranscriptSettingTab(this.app, this));
 	}
 
-	async openView(url: string) {
-		const leaf = this.app.workspace.getRightLeaf(false)!;
-		await leaf.setViewState({
-			type: TRANSCRIPT_TYPE_VIEW,
+	async insertTranscript(url: string, editor: Editor, view: MarkdownView) {
+		try {
+			new Notice("Fetching YouTube transcript...");
+			
+			// Use the YoutubeTranscript class from your fetch-transcript.ts file
+			const config: TranscriptConfig = {
+				lang: this.settings.lang,
+				country: this.settings.country
+			};
+			
+			const transcript = await YoutubeTranscript.fetchTranscript(url, config);
+			
+			if (!transcript || transcript.lines.length === 0) {
+				new Notice("No transcript found for this video");
+				return;
+			}
+			
+			// Format transcript with timestamps based on settings
+			const formattedTranscript = this.formatTranscript(transcript, url);
+			
+			// Insert at cursor position
+			const cursorPos = editor.getCursor();
+			editor.replaceRange(formattedTranscript, cursorPos);
+			
+			new Notice("Transcript inserted successfully");
+		} catch (error) {
+			console.error("Error fetching transcript:", error);
+			new Notice("Failed to fetch transcript: " + (error instanceof Error ? error.message : "Unknown error"));
+		}
+	}
+	
+	formatTranscript(transcript: TranscriptResponse, url: string): string {
+		// Extract video title
+		const title = transcript.title || `YouTube Transcript`;
+		
+		let output = `## ${title}\n\n[Video Link](${url})\n\n`;
+		
+		// Process transcript entries
+		transcript.lines.forEach((line, index) => {
+			// Add timestamp based on timestampMod setting
+			if (index % this.settings.timestampMod === 0) {
+				const timestamp = this.formatTimestamp(line.offset / 1000); // Convert ms to seconds
+				output += `**[${timestamp}]** `;
+			}
+			
+			output += line.text + " ";
+			
+			// Add line breaks between paragraphs for readability
+			if ((index + 1) % (this.settings.timestampMod * 2) === 0) {
+				output += "\n\n";
+			}
 		});
-		this.app.workspace.revealLeaf(leaf);
-		leaf.setEphemeralState({
-			url,
-		});
+		
+		return output;
+	}
+	
+	formatTimestamp(seconds: number): string {
+		const hrs = Math.floor(seconds / 3600);
+		const mins = Math.floor((seconds % 3600) / 60);
+		const secs = Math.floor(seconds % 60);
+		
+		if (hrs > 0) {
+			return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+		} else {
+			return `${mins}:${secs.toString().padStart(2, '0')}`;
+		}
 	}
 
 	onunload() {
-		this.app.workspace.detachLeavesOfType(TRANSCRIPT_TYPE_VIEW);
+		// No special cleanup needed
 	}
 
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			await this.loadData(),
+			await this.loadData()
 		);
 	}
 
@@ -89,9 +144,8 @@ export default class YTranscriptPlugin extends Plugin {
 	}
 }
 
-class YTranslateSettingTab extends PluginSettingTab {
+class YTranscriptSettingTab extends PluginSettingTab {
 	plugin: YTranscriptPlugin;
-	values: Record<string, string>;
 
 	constructor(app: App, plugin: YTranscriptPlugin) {
 		super(app, plugin);
@@ -106,7 +160,7 @@ class YTranslateSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Timestamp interval")
 			.setDesc(
-				"Indicates how often timestamp should occur in text (1 - every line, 10 - every 10 lines)",
+				"Indicates how often timestamp should occur in text (1 - every line, 10 - every 10 lines)"
 			)
 			.addText((text) =>
 				text
@@ -117,7 +171,7 @@ class YTranslateSettingTab extends PluginSettingTab {
 							? 5
 							: v;
 						await this.plugin.saveSettings();
-					}),
+					})
 			);
 
 		new Setting(containerEl)
@@ -129,7 +183,7 @@ class YTranslateSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.lang = value;
 						await this.plugin.saveSettings();
-					}),
+					})
 			);
 
 		new Setting(containerEl)
@@ -141,7 +195,7 @@ class YTranslateSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.country = value;
 						await this.plugin.saveSettings();
-					}),
+					})
 			);
 	}
 }
