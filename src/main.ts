@@ -30,19 +30,6 @@ export default class YTranscriptPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.addCommand({
-			id: "transcript-from-text",
-			name: "Insert YouTube transcript from selected URL",
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				const url = EditorExtensions.getSelectedText(editor).trim();
-				if (url) {
-					this.insertTranscript(url, editor, view);
-				} else {
-					new Notice("No URL selected");
-				}
-			},
-		});
-
-		this.addCommand({
 			id: "transcript-from-prompt",
 			name: "Insert YouTube transcript from URL prompt",
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
@@ -80,11 +67,12 @@ export default class YTranscriptPlugin extends Plugin {
 		this.addSettingTab(new YTranscriptSettingTab(this.app, this));
 	}
 
+	// Replace the existing insertTranscript method with this version
+
 	async insertTranscript(url: string, editor: Editor, view: MarkdownView) {
 		try {
 			new Notice("Fetching YouTube transcript...");
 
-			// Use the YoutubeTranscript class from your fetch-transcript.ts file
 			const config: TranscriptConfig = {
 				lang: this.settings.lang,
 				country: this.settings.country
@@ -98,18 +86,42 @@ export default class YTranscriptPlugin extends Plugin {
 			}
 
 			// Format transcript with timestamps based on settings
-			const formattedTranscript = this.formatTranscript(transcript, url);
+			let formattedTranscript = this.formatTranscript(transcript, url);
 
-			// Insert at cursor position
+			// Determine insertion point
 			const cursorPos = editor.getCursor();
-			editor.replaceRange(formattedTranscript, cursorPos);
+			const content = editor.getValue();
+
+			// Check if cursor is inside YAML frontmatter
+			const frontmatterMatch = content.match(/^---\r?\n(?:.+?\r?\n)+?---\r?\n/s);
+			let insertPosition = cursorPos;
+
+			if (frontmatterMatch) {
+				const frontmatterEndPos = frontmatterMatch[0].length;
+
+				// Calculate cursor position in document
+				const cursorOffset = editor.posToOffset(cursorPos);
+
+				// If cursor is inside frontmatter, insert after frontmatter
+				if (cursorOffset <= frontmatterEndPos) {
+					insertPosition = editor.offsetToPos(frontmatterEndPos);
+
+					// Add a newline if there's not already one
+					if (!content.substring(frontmatterEndPos).startsWith("\n\n")) {
+						formattedTranscript = "\n" + formattedTranscript;
+					}
+				}
+			}
+
+			// Insert at determined position
+			editor.replaceRange(formattedTranscript, insertPosition);
 
 			new Notice("Transcript inserted successfully");
 		} catch (error) {
 			console.error("Error fetching transcript:", error);
 			new Notice("Failed to fetch transcript: " + (error instanceof Error ? error.message : "Unknown error"));
 		}
-	}
+	}	
 
 	formatTranscript(transcript: TranscriptResponse, url: string): string {
 		// Extract video title
@@ -127,8 +139,8 @@ export default class YTranscriptPlugin extends Plugin {
 
 			output += line.text + " ";
 
-			// Add line breaks between paragraphs for readability
-			if ((index + 1) % (this.settings.timestampMod * 2) === 0) {
+			// Add line breaks between every x timestamps for readability
+			if ((index + 1) % (this.settings.timestampMod * 1) === 0) {
 				output += "\n\n";
 			}
 		});
