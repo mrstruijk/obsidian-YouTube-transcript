@@ -1,10 +1,10 @@
 {
-	"id": "ytranscript",
-	"name": "YTranscript",
-	"version": "1.0.0",
+	"id": "youtube-transcript-note",
+	"name": "YouTube Transcript Note",
+	"version": "0.0.2",
 	"minAppVersion": "0.15.0",
-	"description": "This is simple plugin to fetch transcription for Youtube.",
-	"author": "Łukasz Strzępek",
-	"authorUrl": "https://github.com/lstrzepek",
+	"description": "This is a plugin to fetch transcription for Youtube and pastes it into your note. Fork of lstrzepek/obsidian-yt-transcript.",
+	"author": "Maarten R. Struijk Wilbrink",
+	"authorUrl": "https://github.com/mrstruijk",
 	"isDesktopOnly": false
 }
